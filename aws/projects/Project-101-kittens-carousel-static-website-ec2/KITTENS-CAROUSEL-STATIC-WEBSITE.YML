@@ -27,20 +27,31 @@ LogicalID:
     InstanceType: t2.micro
     KeyName: rzn
     SecurityGroupIds:
-      !Ref WebServerSecurityGroups
+      - !Ref WebServerSecurityGroups
     Tags:
       - Key: Name
-        Value: Web Server of ${AWS: :StackName} Stack
+        Value: !Sub Web Server of ${AWS: :StackName} Stack
       
     UserData: 
       Fn: :Base64:
         !Sub | 
-          # ! /bin/bash
+          #! /bin/bash
           yum update -y 
           yum install httpd -y 
+          FOLDER="https://raw.githubusercontent.com/Kaya-Ramazan/My-Project/main/aws/projects/Project-101-kittens-carousel-static-website-ec2/static-web"
           cd /var/www/html
+          wget $FOLDER/index.html
+          wget $FOLDER/cat0.jpg
+          wget $FOLDER/cat1.jpg
+          wget $FOLDER/cat2.jpg
+          wget $FOLDER/cat3.png
+          systemct1 start httpd
+          systemct1 enable httpd
+          
 
-    Volumes:
-      Volumes      
-  
 Outputs:
+  WebsiteURL:
+    Value: !Sub 
+      - http://${PublicAdress}
+      - PublicAddress: !GetAtt WebserverHost.PublicDnsName
+    Description: Kittens Carousel Application URL  
