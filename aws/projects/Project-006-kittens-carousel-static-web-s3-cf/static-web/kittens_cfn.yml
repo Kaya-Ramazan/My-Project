@@ -1,0 +1,109 @@
+AWSTemplateFormatVersion: 2010-09-09
+Description: |
+  Cloudformation Template for kittens carousel static website deploy on s3 through cloudfront and route 53
+
+Parameters:
+  DomainName:
+      # We'll take domain name and subdomain name from the user at the beginning of cloudformation. To do this we'll define them into the parameters part.
+    Description: DNS Name of existing Amazon Route 53 hosted zone ex. clarusway.us
+    Type: AWS::Route53::HostedZone::Id
+  KittensDomainName:
+    Description: Full domain name for the App. ex. vincenzo.clarusway.us
+    Type: String
+    AllowedPattern: (?!-)[a-zA-Z0-9-.]{1,63}(?<!-)
+
+Resources:
+  KittensBucket:
+    Type: AWS::S3::Bucket
+    Properties: 
+      AccessControl: PublicRead
+      BucketName: !Ref KittensDomainName
+      WebsiteConfiguration: 
+        IndexDocument: index.html
+            # within the permission part. You might remember. Since we're going to use this bucket as static website, we need to allow access from anywhere. So, we need to create bucket policy. Show one of the bucket policy which allows publicly accessible. then compare their lines with this bucket policy 
+
+  KittensBucketPolicy:
+    Type: AWS::S3::BucketPolicy
+    Properties:
+      Bucket: !Ref KittensBucket  #This is going to be our bucket name.
+      PolicyDocument:     
+        Statement:    # Show normal policy and move them here.
+          - Sid: PublicReadforStaticWebsite
+            Effect: Allow
+            Principal: '*'
+            Action: s3:GetObject
+            Resource: !Join ['', ['arn:aws:s3:::', !Ref 'KittensBucket', /*]] # I'm gonna use here join intrinsic  function which is acting just as our join function in python. it combines values putting delimiter among each other. 
+            # Resource: !Sub "${KittenBucket.Arn}/*"    
+  KittensCertificate:
+    Type: AWS::CertificateManager::Certificate
+    Properties:
+      CertificateTransparencyLoggingPreference: ENABLED
+            # this just security measure to prevent malicious certificates or mistakes use for domain. 
+            # AWS rout53 also keeps logging for the certificate and this will allow some of the browser won't work because 
+            # if you don't have for the security precautions some other browser requires the logging for these certificate. 
+            # Thats why, we are gonna mak this ENABLED, then our certificate is able to work properly in all browsers. 
+            # According to the document, when a CA issues a publicly trusted certificate, the CA must submit the certificate to one
+            # or more Certificate Transparency log servers. The Certificate Transparency log server responds with a signed 
+            # certificate timestamp (SCT) that confirms the log server will add the certificate to the list of known certificates. 
+            # The SCT is then embedded in the certificate and delivered automatically to a browser. The SCT is like a receipt
+            # that proves the certificate was published into the Certificate Transparency log. Starting April 30, 
+            # Google Chrome will require an SCT as proof that the certificate was published to a Certificate Transparency log in order to tr ust the certificate without displaying an error message.It enables us to be more confident that an unauthorized certificate hasn’t been issued by a CA.
+
+      DomainName: !Ref KittensDomainName #required... we'll indicate that for which domain name is this certificate issued. You can use '*' here to get this certificate for all subdomains.
+      DomainValidationOptions:   # we need to select validation method. More convenient one id DNS validation. 
+        - DomainName: !Ref KittensDomainName
+          HostedZoneId: !Ref DomainName   # we've made it determine to the user in parameter section.
+      ValidationMethod: DNS
+  KittensRecordSet:
+    Type: AWS::Route53::RecordSetGroup
+    Properties:
+      HostedZoneId: !Ref DomainName
+      RecordSets: 
+        - Name: !Ref KittensDomainName
+          Type: A
+          AliasTarget:
+            DNSName: !GetAtt KittensCloudfront.DomainName
+            HostedZoneId: Z2FDTNDATAQYW2
+  KittensCloudfront:
+    Type: AWS::CloudFront::Distribution  # Don't be fooled by how little it is, we'll see a long list soon.
+    Properties:
+      DistributionConfig:
+        Aliases:
+        - !Ref KittensDomainName
+        Comment: Cloudfront Distribution pointing to Kittens S3 bucket
+        DefaultCacheBehavior:  
+                # There are lots of features here. If you don't indicate any of them, it will be accepted by default. 
+                # Here show the default values on the cloudfront console. For example here I don't need to indicate GET and HEAD
+                #  method, because these are selected by default. If I wanna select other options, I have to indicate them here. 
+          AllowedMethods:
+            - GET
+            - HEAD
+          Compress: true
+          ForwardedValues:  # Since we're using static website, we don't need to use cookies.
+            QueryString: true  # This is string after the path in URL
+            Cookies:
+              Forward: none
+          TargetOriginId: KittensOrigin   # When we create origin a couple of lines later, we'll determine origin id, and this origin id is indicated here to show origin.
+          ViewerProtocolPolicy: allow-all  # This part shows that how to user can connect to the cloudfront. I'll stick with allow-all. it allows http and https.
+        DefaultRootObject: index.html
+        Enabled: true
+        HttpVersion: 'http2'
+        Origins:   # are different origins in our account. We have to show s3 bucket domain name here as origin. this is a tricky part. 
+        - DomainName: !Select [2, !Split ["/", !GetAtt KittensBucket.WebsiteURL]]
+          Id: KittensOrigin  # I mentioned this before, We should determine originid here, As you remember this has referenced as "TargetOriginId". 
+          CustomOriginConfig:  # If you are using S3 bucket as static website, we need to determine this part. If we don't use s3 as static web-site, we use S3OriginConfig.
+            OriginProtocolPolicy: http-only  # In here, we determine cloudfront connection behavior with the origin. I'll stick with the http-only. 
+        PriceClass: PriceClass_All
+        ViewerCertificate:  # Now we're gonna indicate our certificate which is just created for cloudfront. To define this we'll use these two lines.
+          AcmCertificateArn: !Ref KittensCertificate
+          SslSupportMethod: sni-only  # This part is for Custom SSL Client Support. We'll stick with sni-only which is recommended by AWS
+Outputs:
+  BucketName: 
+    Description: S3 Bucket URL for Kittens Website
+    Value: !GetAtt KittensBucket.WebsiteURL
+  CloudfrontEndpoint:
+    Description: Endpoint for Kittens Cloudfront
+    Value: !GetAtt KittensCloudfront.DomainName
+  FullDomainName:
+    Description: Full Domain Name of my Application
+    Value: !Ref KittensRecordSet
